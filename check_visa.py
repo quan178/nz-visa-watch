@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
  
 URL = "https://www.immigration.govt.nz/visas/vietnam-working-holiday-visa/"
@@ -62,15 +63,19 @@ def notify(title, message, priority="high"):
     urllib.request.urlopen(req, timeout=30).read()
  
  
-def main():
-    current = get_status(to_lines(fetch_page()))
-    print("Hien tai:", current)
- 
-    previous = None
+def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, encoding="utf-8") as f:
-            previous = json.load(f)
+            return json.load(f)
+    return None
  
+ 
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+ 
+ 
+def handle(previous, current):
     if previous is None:
         notify(
             "NZ visa watcher started",
@@ -85,10 +90,7 @@ def main():
                 priority="urgent",
             )
         elif current["status"] == "Closed":
-            notify(
-                "NZ visa: cong da DONG",
-                f"Cổng đã đóng. {current['detail']}",
-            )
+            notify("NZ visa: cong da DONG", f"Cổng đã đóng. {current['detail']}")
         else:
             notify(
                 "NZ visa: trang thay doi",
@@ -96,14 +98,28 @@ def main():
                 "Hãy mở trang kiểm tra thủ công.",
             )
  
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(current, f, ensure_ascii=False, indent=2)
+ 
+def main():
+    loop_seconds = int(os.environ.get("LOOP_SECONDS", "330"))
+    interval = int(os.environ.get("INTERVAL", "20"))
+    deadline = time.time() + loop_seconds
+    previous = load_state()
+ 
+    while True:
+        try:
+            current = get_status(to_lines(fetch_page()))
+            print(time.strftime("%H:%M:%S"), current, flush=True)
+            if previous != current:
+                handle(previous, current)
+                save_state(current)
+                previous = current
+        except Exception as exc:
+            print("Loi (se thu lai):", exc, file=sys.stderr, flush=True)
+        if time.time() + interval >= deadline:
+            break
+        time.sleep(interval)
  
  
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:  # để GitHub báo lỗi qua email nếu có sự cố
-        print("Loi:", exc, file=sys.stderr)
-        sys.exit(1)
+    main()
  
